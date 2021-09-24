@@ -9,6 +9,11 @@ Do you really want this?
 
 #define NUMBER_OF_CLICKS_TO_RESTART 5 //How many clicks of Up/Down button needed to restart controller
 
+#define CONTROL_DCDC_CONVERTER_POWER true //Is need to control power of DC\DC converter for ULN2003
+#ifndef MotorPowerEnablePIN
+    #define MotorPowerEnablePIN LED_BUILTIN // Pin which enable dc/dc power converter for ULN2003
+#endif
+
 #include <CheapStepper.h>
 //#include <ESP8266mDNS.h>
 //#include <WiFiUdp.h>
@@ -23,7 +28,7 @@ Do you really want this?
 #include "Helpers/StepperHelper.h"
 #include "index_html.h"
 #include <string>
-
+ADC_MODE(ADC_VCC);
 //----------------------------------------------------
 
 // Version number for checking if there are new code releases and notifying the user
@@ -35,6 +40,7 @@ ButtonsHelper buttonsHelper = ButtonsHelper();
 StepperHelper stepperHelpers[MAX_STEPPERS_COUNT];
 
 // -------------------------------- ADC setup ------------------------------------------
+
 #ifndef UseADC
     #define UseADC true // Allow ADC reading
 #endif
@@ -46,7 +52,7 @@ StepperHelper stepperHelpers[MAX_STEPPERS_COUNT];
 #endif
 
 #if !defined(TimeBetweenReadingADC) || (TimeBetweenReadingADC < 200)
-  #define TimeBetweenReadingADC 3000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
+  #define TimeBetweenReadingADC 1000//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
 #endif
 #ifndef ThresholdReadingADC
     #define ThresholdReadingADC 5 // following the comparison between the previous value and the current one +- the threshold the value will be published or not
@@ -62,8 +68,10 @@ int persistedadc = 0;
 int sendADCnoChange = 0;
 int sendADCnoChangeTreshold = 5;
 boolean initADC = false;
-String mqttoutadcraw;
-String mqttoutadcvolt;
+const String MQTTOutADCRawTopic = "/adcraw";
+const String MQTTOutADCVoltTopic = "/adcvolt";
+    //mqttoutadcraw =  mqttHelper.outputTopic + "/adcraw";
+    //mqttoutadcvolt = mqttHelper.outputTopic + "/adcvolt"
 // --------------------------------------------------------------------------------------
 
 String deviceHostname;             //WIFI config: Bonjour name of device
@@ -127,39 +135,42 @@ void sendRAW_ADC(int raw_value) {
     DynamicJsonBuffer jsonBuffer_raw(200);
     JsonObject& root_raw = jsonBuffer_raw.createObject();
 
-    root_raw["value"] = raw_value;
+    root_raw["value"] = raw_value / 0.96;
 
     char jsonOutput_raw[128]; //@TODO: Calculate capacity for JSON
     root_raw.printTo(jsonOutput_raw);
     Serial.println("Broadcasting JSON:" + String(jsonOutput_raw));
 
     if (mqttHelper.isMqttEnabled && mqttHelper.getClient().connected()) {
-        mqttHelper.publishMsg(mqttoutadcraw, jsonOutput_raw);
+        //mqttHelper.publishMsg(mqttoutadcraw, jsonOutput_raw);
+        mqttHelper.publishMsg(mqttHelper.outputTopic+MQTTOutADCRawTopic, jsonOutput_raw);
     }
 
     webSocket.broadcastTXT(jsonOutput_raw);
 }
 
 void sendVOLT_ADC(int raw_value){
-    int val = 0;
+    float val = 0;
     float volt = 0;
 
     DynamicJsonBuffer jsonBuffer_volt(200);
     JsonObject& root_volt = jsonBuffer_volt.createObject();
 
-    if (USE_Divider_Resistor_Value) { volt = raw_value * (adc_resistor_devider / 1024.0); }
-     else { volt = raw_value * (adc_divider_voltage / 1024.0); }
-    val = (volt * 100);
-    volt = (float)val / 100.0;
+    if (USE_Divider_Resistor_Value) { volt = raw_value * (adc_resistor_devider / 1023.0); }
+     else { volt = raw_value * (adc_divider_voltage / 1023.0); }
+    volt = raw_value / 1023;
+   // val = (volt * 100);
+    //volt = (float)val / 100.0;
 
-    root_volt["value"] = volt;
+    root_volt["value"] = volt / 0.96;
 
     char jsonOutput_volt[128]; //@TODO: Calculate capacity for JSON
     root_volt.printTo(jsonOutput_volt);
     Serial.println("Broadcasting JSON:" + String(jsonOutput_volt));
 
     if (mqttHelper.isMqttEnabled && mqttHelper.getClient().connected()) {
-        mqttHelper.publishMsg(mqttoutadcvolt, jsonOutput_volt);
+        //mqttHelper.publishMsg(mqttoutadcvolt, jsonOutput_volt);
+        mqttHelper.publishMsg(mqttHelper.outputTopic+MQTTOutADCVoltTopic, jsonOutput_volt);
     }
 
     webSocket.broadcastTXT(jsonOutput_volt);
@@ -169,7 +180,8 @@ void sendVOLT_ADC(int raw_value){
 
 void sendADC() {
     int sensorValue = 0; //ADC Value
-    sensorValue = analogRead(analogInPin);
+    //sensorValue = analogRead(analogInPin);
+    sensorValue = ESP.getVcc(); // + 350; ?????????
     if (isnan(sensorValue)) {
       Serial.println("Failed to read from ADC !");
     } else {
@@ -263,11 +275,21 @@ void processCommand(const String& command, const String& value, int stepperNum, 
     if (command == "start") { // Store the current position as the start position
         stepperHelper->currentPosition = 0;
         stepperHelper->route = 0;
+        if (CONTROL_DCDC_CONVERTER_POWER) {
+            if ( digitalRead(MotorPowerEnablePIN) == HIGH ) {
+               digitalWrite(MotorPowerEnablePIN, LOW);
+            }
+        }
         stepperHelper->action = "manual";
         saveItNow = true;
     } else if (command == "max") { // Store the max position of a closed blind
         stepperHelper->maxPosition = stepperHelper->currentPosition;
         stepperHelper->route = 0;
+        if (CONTROL_DCDC_CONVERTER_POWER) {
+            if ( digitalRead(MotorPowerEnablePIN) == HIGH ) {
+               digitalWrite(MotorPowerEnablePIN, LOW);
+            }
+        }
         stepperHelper->action = "manual";
         saveItNow = true;
     } else if (command == "stop") { // STOP!
@@ -276,9 +298,19 @@ void processCommand(const String& command, const String& value, int stepperNum, 
         saveItNow = true;
     } else if (command == "manual" && value == "1") { // Move down without limit to max position
         stepperHelper->route = 1;
+        if (CONTROL_DCDC_CONVERTER_POWER) {
+            if ( digitalRead(MotorPowerEnablePIN) == HIGH ) {
+               digitalWrite(MotorPowerEnablePIN, LOW);
+            }
+        }
         stepperHelper->action = "manual";
     } else if (command == "manual" && value == "-1") { // Move up without limit to top position
         stepperHelper->route = -1;
+        if (CONTROL_DCDC_CONVERTER_POWER) {
+            if ( digitalRead(MotorPowerEnablePIN) == HIGH ) {
+               digitalWrite(MotorPowerEnablePIN, LOW);
+            }
+        }
         stepperHelper->action = "manual";
     } else {
         /*
@@ -289,6 +321,11 @@ void processCommand(const String& command, const String& value, int stepperNum, 
 
         stepperHelper->targetPosition = stepperHelper->maxPosition * value.toInt() / 100;
         stepperHelper->route = stepperHelper->currentPosition < stepperHelper->targetPosition ? 1 : -1;
+        if (CONTROL_DCDC_CONVERTER_POWER) {
+            if ( digitalRead(MotorPowerEnablePIN) == HIGH ) {
+               digitalWrite(MotorPowerEnablePIN, LOW);
+            }
+        }
         stepperHelper->action = "auto";
 
         stepperHelper->set = value.toInt();
@@ -300,7 +337,6 @@ void processCommand(const String& command, const String& value, int stepperNum, 
                       stepperHelper->targetPosition);
         stepperHelper->getStepper()->newMove(stepperHelper->route == 1,
                                             abs(stepperHelper->currentPosition - stepperHelper->targetPosition));
-
         //Send the instruction to all connected devices
         sendUpdate();
     }
@@ -581,10 +617,10 @@ void setup(void) {
     }
 
     mqttHelper.setup(mqttCallback);
-    mqttoutadcraw =  mqttHelper.outputTopic + "/adcraw";
-    mqttoutadcvolt = mqttHelper.outputTopic + "/adcvolt";
-    Serial.println("mqttoutadcraw:" + mqttoutadcraw);
-    Serial.println("mqttoutadcvolt:" + mqttoutadcvolt);    
+    //mqttoutadcraw =  mqttHelper.outputTopic + "/adcraw";
+    //mqttoutadcvolt = mqttHelper.outputTopic + "/adcvolt";
+    //Serial.println("mqttoutadcraw:" + mqttoutadcraw);
+    //Serial.println("mqttoutadcvolt:" + mqttoutadcvolt);    
 
     //Update webpage
     INDEX_HTML.replace("{VERSION}", "v" + version);
@@ -606,6 +642,8 @@ void stopPowerToCoils() {
     for (StepperHelper stepperHelper : stepperHelpers) {
         if (stepperHelper.isConnected()) {
             stepperHelper.disablePowerToCoils();
+            if (CONTROL_DCDC_CONVERTER_POWER) {
+                digitalWrite(MotorPowerEnablePIN, HIGH); }
         }
     }
 }
@@ -664,6 +702,7 @@ void loop(void) {
                 sendUpdate();
                 Serial.printf("Stepper %i has reached target position.\r\n", num);
                 saveItNow = true;
+                //digitalWrite(LED_BUILTIN, HIGH);
                 isTimeToSendUpdate = true;
             }
         } else if (stepperHelper.action == "manual" && stepperHelper.route != 0) {
@@ -686,9 +725,13 @@ void loop(void) {
 
     if (UseADC) {
        if (!initADC){
-           pinMode(analogInPin, INPUT);
-           initADC = true;
-           Serial.println("ADC Input Init");
+          //pinMode(analogInPin, INPUT);
+          if (CONTROL_DCDC_CONVERTER_POWER) { 
+             pinMode(MotorPowerEnablePIN, OUTPUT);
+             digitalWrite(MotorPowerEnablePIN, HIGH);
+          }
+          initADC = true;
+          Serial.println("ADC Input Init");
        } // else { Serial.println("ADC input Already Initiated"); }
        if (millis() > (timeadc + TimeBetweenReadingADC)) {
            timeadc = millis();
