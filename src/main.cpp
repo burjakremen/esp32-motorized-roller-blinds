@@ -28,7 +28,7 @@ Do you really want this?
 #include "Helpers/StepperHelper.h"
 #include "index_html.h"
 #include <string>
-ADC_MODE(ADC_VCC);
+//ADC_MODE(ADC_VCC);
 //----------------------------------------------------
 
 // Version number for checking if there are new code releases and notifying the user
@@ -52,22 +52,23 @@ StepperHelper stepperHelpers[MAX_STEPPERS_COUNT];
 #endif
 
 #if !defined(TimeBetweenReadingADC) || (TimeBetweenReadingADC < 200)
-  #define TimeBetweenReadingADC 1000//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
+  #define TimeBetweenReadingADC 1800000//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
 #endif
 #ifndef ThresholdReadingADC
-    #define ThresholdReadingADC 5 // following the comparison between the previous value and the current one +- the threshold the value will be published or not
+    #define ThresholdReadingADC 1 // following the comparison between the previous value and the current one +- the threshold the value will be published or not
 #endif
 #define USE_Divider_Resistor_Value false //Use 'devider resistor' value instead of 'voltage'
 
 const int analogInPin = A0; //ADC pin
 unsigned long timeadc = 0;
-float adc_divider_voltage = 3.3; //ADC Divider Input voltage, for LiOn Accum`s 4.2
+float adc_divider_voltage = 4.23; //ADC Divider Input voltage, for LiOn Accum`s 4.2
 const float ext_resistor_kiloohm = 100;
 const float adc_resistor_devider = (ext_resistor_kiloohm+220)/100+1;
 int persistedadc = 0;
 int sendADCnoChange = 0;
-int sendADCnoChangeTreshold = 5;
+int sendADCnoChangeTreshold = 2;
 boolean initADC = false;
+boolean SendInitialADC = true;
 const String MQTTOutADCRawTopic = "/adcraw";
 const String MQTTOutADCVoltTopic = "/adcvolt";
     //mqttoutadcraw =  mqttHelper.outputTopic + "/adcraw";
@@ -135,14 +136,13 @@ void sendRAW_ADC(int raw_value) {
     DynamicJsonBuffer jsonBuffer_raw(200);
     JsonObject& root_raw = jsonBuffer_raw.createObject();
 
-    root_raw["value"] = raw_value / 0.96;
+    root_raw["value"] = raw_value;
 
     char jsonOutput_raw[128]; //@TODO: Calculate capacity for JSON
     root_raw.printTo(jsonOutput_raw);
     Serial.println("Broadcasting JSON:" + String(jsonOutput_raw));
 
     if (mqttHelper.isMqttEnabled && mqttHelper.getClient().connected()) {
-        //mqttHelper.publishMsg(mqttoutadcraw, jsonOutput_raw);
         mqttHelper.publishMsg(mqttHelper.outputTopic+MQTTOutADCRawTopic, jsonOutput_raw);
     }
 
@@ -150,26 +150,24 @@ void sendRAW_ADC(int raw_value) {
 }
 
 void sendVOLT_ADC(int raw_value){
-    float val = 0;
+    int val = 0;
     float volt = 0;
 
     DynamicJsonBuffer jsonBuffer_volt(200);
     JsonObject& root_volt = jsonBuffer_volt.createObject();
 
-    if (USE_Divider_Resistor_Value) { volt = raw_value * (adc_resistor_devider / 1023.0); }
-     else { volt = raw_value * (adc_divider_voltage / 1023.0); }
-    volt = raw_value / 1023;
-   // val = (volt * 100);
-    //volt = (float)val / 100.0;
+    if (USE_Divider_Resistor_Value) { volt = raw_value * (adc_resistor_devider / 1024.0); }
+     else { volt = raw_value * (adc_divider_voltage / 1024.0); }
+    val = (volt * 100);
+    volt = (float)val / 100.0;
 
-    root_volt["value"] = volt / 0.96;
+    root_volt["value"] = volt;
 
     char jsonOutput_volt[128]; //@TODO: Calculate capacity for JSON
     root_volt.printTo(jsonOutput_volt);
     Serial.println("Broadcasting JSON:" + String(jsonOutput_volt));
 
     if (mqttHelper.isMqttEnabled && mqttHelper.getClient().connected()) {
-        //mqttHelper.publishMsg(mqttoutadcvolt, jsonOutput_volt);
         mqttHelper.publishMsg(mqttHelper.outputTopic+MQTTOutADCVoltTopic, jsonOutput_volt);
     }
 
@@ -180,8 +178,7 @@ void sendVOLT_ADC(int raw_value){
 
 void sendADC() {
     int sensorValue = 0; //ADC Value
-    //sensorValue = analogRead(analogInPin);
-    sensorValue = ESP.getVcc(); // + 350; ?????????
+    sensorValue = analogRead(analogInPin);
     if (isnan(sensorValue)) {
       Serial.println("Failed to read from ADC !");
     } else {
@@ -617,10 +614,6 @@ void setup(void) {
     }
 
     mqttHelper.setup(mqttCallback);
-    //mqttoutadcraw =  mqttHelper.outputTopic + "/adcraw";
-    //mqttoutadcvolt = mqttHelper.outputTopic + "/adcvolt";
-    //Serial.println("mqttoutadcraw:" + mqttoutadcraw);
-    //Serial.println("mqttoutadcvolt:" + mqttoutadcvolt);    
 
     //Update webpage
     INDEX_HTML.replace("{VERSION}", "v" + version);
@@ -702,7 +695,6 @@ void loop(void) {
                 sendUpdate();
                 Serial.printf("Stepper %i has reached target position.\r\n", num);
                 saveItNow = true;
-                //digitalWrite(LED_BUILTIN, HIGH);
                 isTimeToSendUpdate = true;
             }
         } else if (stepperHelper.action == "manual" && stepperHelper.route != 0) {
@@ -725,14 +717,20 @@ void loop(void) {
 
     if (UseADC) {
        if (!initADC){
-          //pinMode(analogInPin, INPUT);
-          if (CONTROL_DCDC_CONVERTER_POWER) { 
+          pinMode(analogInPin, INPUT);
+          if (CONTROL_DCDC_CONVERTER_POWER) {
              pinMode(MotorPowerEnablePIN, OUTPUT);
              digitalWrite(MotorPowerEnablePIN, HIGH);
           }
           initADC = true;
           Serial.println("ADC Input Init");
        } // else { Serial.println("ADC input Already Initiated"); }
+       if (SendInitialADC) {
+          if (mqttHelper.isMqttEnabled && mqttHelper.getClient().connected()){
+             sendADC();
+             SendInitialADC = false;
+          }
+       }
        if (millis() > (timeadc + TimeBetweenReadingADC)) {
            timeadc = millis();
            sendADC();
