@@ -586,7 +586,7 @@ void setup(void) {
     //     delay(1000);
     //   }
     // }
-    Serial.print("Connect to http://");
+    Serial.print("Local IP: ");
     Serial.println(WiFi.localIP());
 
     //Start HTTP server
