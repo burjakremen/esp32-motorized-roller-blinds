@@ -18,15 +18,15 @@ Do you really want this?
 //#include <ESP8266mDNS.h>
 //#include <WiFiUdp.h>
 
-#include <WebSocketsServer.h>
-#include <ArduinoOTA.h>
+// --- #include <WebSocketsServer.h>
+// --- #include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <WiFiSettings.h>
 #include "Helpers/ConfigHelper.h"
 #include "Helpers/MqttHelper.h"
 #include "Helpers/ButtonsHelper.h"
 #include "Helpers/StepperHelper.h"
-#include "index_html.h"
+// --- #include "index_html.h"
 #include <string>
 //ADC_MODE(ADC_VCC);
 //----------------------------------------------------
@@ -52,10 +52,10 @@ StepperHelper stepperHelpers[MAX_STEPPERS_COUNT];
 #endif
 
 #if !defined(TimeBetweenReadingADC) || (TimeBetweenReadingADC < 200)
-  #define TimeBetweenReadingADC 1800000//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
+  #define TimeBetweenReadingADC 500//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
 #endif
 #ifndef ThresholdReadingADC
-    #define ThresholdReadingADC 1 // following the comparison between the previous value and the current one +- the threshold the value will be published or not
+    #define ThresholdReadingADC 5 // following the comparison between the previous value and the current one +- the threshold the value will be published or not
 #endif
 #define USE_Divider_Resistor_Value false //Use 'devider resistor' value instead of 'voltage'
 
@@ -71,8 +71,6 @@ boolean initADC = false;
 boolean SendInitialADC = true;
 const String MQTTOutADCRawTopic = "/adcraw";
 const String MQTTOutADCVoltTopic = "/adcvolt";
-    //mqttoutadcraw =  mqttHelper.outputTopic + "/adcraw";
-    //mqttoutadcvolt = mqttHelper.outputTopic + "/adcvolt"
 // --------------------------------------------------------------------------------------
 
 String deviceHostname;             //WIFI config: Bonjour name of device
@@ -83,14 +81,14 @@ long lastPublish = 0;
 boolean loadDataSuccess = false;
 boolean saveItNow = false;          //If true will store positions to filesystem
 boolean initLoop = true;            //To enable actions first time the loop is run
-
+/*
 #ifdef ESP32
 WebServer server(80);              // TCP server at port 80 will respond to HTTP requests
 #else
 ESP8266WebServer server(80);              // TCP server at port 80 will respond to HTTP requests
 #endif
-
-WebSocketsServer webSocket = WebSocketsServer(81);  // WebSockets will respond on port 81
+*/
+// --- WebSocketsServer webSocket = WebSocketsServer(81);  // WebSockets will respond on port 81
 
 bool loadConfig() {
     if (!helper.loadconfig()) {
@@ -146,7 +144,7 @@ void sendRAW_ADC(int raw_value) {
         mqttHelper.publishMsg(mqttHelper.outputTopic+MQTTOutADCRawTopic, jsonOutput_raw);
     }
 
-    webSocket.broadcastTXT(jsonOutput_raw);
+// ---    webSocket.broadcastTXT(jsonOutput_raw);
 }
 
 void sendVOLT_ADC(int raw_value){
@@ -171,7 +169,7 @@ void sendVOLT_ADC(int raw_value){
         mqttHelper.publishMsg(mqttHelper.outputTopic+MQTTOutADCVoltTopic, jsonOutput_volt);
     }
 
-    webSocket.broadcastTXT(jsonOutput_volt);
+// ---    webSocket.broadcastTXT(jsonOutput_volt);
 
 }
 
@@ -241,7 +239,7 @@ void sendUpdate() {
         mqttHelper.publishMsg(mqttHelper.outputTopic, jsonOutput);
     }
 
-    webSocket.broadcastTXT(jsonOutput);
+// ---    webSocket.broadcastTXT(jsonOutput);
 }
 
 /****************************************************************************************
@@ -352,7 +350,7 @@ void processRequest(String &payload, uint8_t client_id = 0) {
         Serial.println("parseObject() failed");
     }
 }
-
+/*
 void webSocketEvent(uint8_t clientId, WStype_t type, uint8_t *payload, size_t length) {
     switch (type) {
         case WStype_CONNECTED:
@@ -368,7 +366,7 @@ void webSocketEvent(uint8_t clientId, WStype_t type, uint8_t *payload, size_t le
             break;
     }
 }
-
+*/
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
     Serial.print("MQTT message received [");
     Serial.print(topic);
@@ -379,7 +377,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
     }
     processRequest(jsonRequest);
 }
-
+/*
 void handleRoot() {
     server.send(200, "text/html", INDEX_HTML);
 }
@@ -398,7 +396,8 @@ void handleNotFound() {
     }
     server.send(404, "text/plain", message);
 }
-
+*/
+/*
 void setupOTA() {
     // Authentication to avoid unauthorized updates
     //ArduinoOTA.setPassword(OTA_PWD); //@TODO: make it configurable
@@ -425,7 +424,7 @@ void setupOTA() {
 
     ArduinoOTA.begin();
 }
-
+*/
 void onPressHandler(Button2 &btn) {
     Serial.println("onPressHandler");
     String newValue;
@@ -543,12 +542,12 @@ void setup(void) {
     //clean FS, for testing
     // helper.resetsettings();
 
-    WiFiSettings.onPortal = []() {
-        setupOTA();
-    };
-    WiFiSettings.onPortalWaitLoop = []() {
-        ArduinoOTA.handle();
-    };
+    // --- WiFiSettings.onPortal = []() {
+    // ---     setupOTA();
+    // --- };
+    // --- WiFiSettings.onPortalWaitLoop = []() {
+    // ---     ArduinoOTA.handle();
+    // --- };
     WiFiSettings.onSuccess = []() {
         buttonsHelper.setupButtons();
 
@@ -591,16 +590,16 @@ void setup(void) {
     Serial.println(WiFi.localIP());
 
     //Start HTTP server
-    server.on("/", handleRoot);
-    server.on("/reset", [&] { helper.resetsettings(); });
-    server.onNotFound(handleNotFound);
-    server.begin();
+    // --- server.on("/", handleRoot);
+    // --- server.on("/reset", [&] { helper.resetsettings(); });
+    // --- server.onNotFound(handleNotFound);
+    // --- server.begin();
 
     //Start websocket
-    webSocket.begin();
-    webSocket.onEvent(webSocketEvent);
+    // --- webSocket.begin();
+    // --- webSocket.onEvent(webSocketEvent);
 
-    setupOTA();
+    // --- setupOTA();
 
     uint8_t num = 0;
     String connectedSteppers;
@@ -616,9 +615,9 @@ void setup(void) {
     mqttHelper.setup(mqttCallback);
 
     //Update webpage
-    INDEX_HTML.replace("{VERSION}", "v" + version);
-    INDEX_HTML.replace("{NAME}", String(deviceHostname));
-    INDEX_HTML.replace("{CONNECTED_STEPPERS}", connectedSteppers);
+    // --- INDEX_HTML.replace("{VERSION}", "v" + version);
+    // --- INDEX_HTML.replace("{NAME}", String(deviceHostname));
+    // --- INDEX_HTML.replace("{CONNECTED_STEPPERS}", connectedSteppers);
 
 #ifdef ESP32
     esp_task_wdt_init(10, true);
@@ -643,10 +642,10 @@ void stopPowerToCoils() {
 
 void loop(void) {
     //OTA client code
-    ArduinoOTA.handle();
+    // --- ArduinoOTA.handle();
 
     //Websocket listner
-    webSocket.loop();
+    // --- webSocket.loop();
 #ifdef ESP32
     esp_task_wdt_reset();
 #else //ESP8266
@@ -660,7 +659,7 @@ void loop(void) {
     /**
       Serving the webpage
     */
-    server.handleClient();
+    // --- server.handleClient();
 
     mqttHelper.loop();
 
