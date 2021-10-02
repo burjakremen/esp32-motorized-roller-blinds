@@ -69,6 +69,7 @@ int sendADCnoChange = 0;
 int sendADCnoChangeTreshold = 2;
 boolean initADC = false;
 boolean SendInitialADC = true;
+boolean PartiallyCharged = false;
 const String MQTTOutADCRawTopic = "/adcraw";
 const String MQTTOutADCVoltTopic = "/adcvolt";
 // --------------------------------------------------------------------------------------
@@ -180,6 +181,11 @@ void sendADC() {
     if (isnan(sensorValue)) {
       Serial.println("Failed to read from ADC !");
     } else {
+      if ( sensorValue > 930 ) { 
+          PartiallyCharged = true;
+      } else { 
+               PartiallyCharged = false;
+             }
       if (sensorValue >= persistedadc + ThresholdReadingADC || sensorValue <= persistedadc - ThresholdReadingADC) {
 
         Serial.println("Creating ADC buffer");
@@ -651,7 +657,10 @@ void loop(void) {
 #else //ESP8266
     ESP.wdtFeed();
 #endif
-
+    if (WiFi.status() != WL_CONNECTED && PartiallyCharged)
+    {
+       ESP.restart();
+    }
     if (buttonsHelper.useButtons) {
         buttonsHelper.processButtons();
     }
