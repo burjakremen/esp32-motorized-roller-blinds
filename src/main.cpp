@@ -26,11 +26,18 @@ Do you really want this?
 #include "Helpers/MqttHelper.h"
 #include "Helpers/ButtonsHelper.h"
 #include "Helpers/StepperHelper.h"
-// --- #include "index_html.h"
+//#include <Pinger.h>
+#include "index_html.h"
 #include <string>
+//#include <stdio.h>
+//#include <stdarg.h>
 //ADC_MODE(ADC_VCC);
 //----------------------------------------------------
 
+inline const char * const BoolToString(bool b)
+{
+  return b ? "true" : "false";
+}
 // Version number for checking if there are new code releases and notifying the user
 String version = "2.0.1(ADCtoMQTT)";
 
@@ -52,7 +59,7 @@ StepperHelper stepperHelpers[MAX_STEPPERS_COUNT];
 #endif
 
 #if !defined(TimeBetweenReadingADC) || (TimeBetweenReadingADC < 200)
-  #define TimeBetweenReadingADC 500//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
+  #define TimeBetweenReadingADC 1000//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
 #endif
 #ifndef ThresholdReadingADC
     #define ThresholdReadingADC 5 // following the comparison between the previous value and the current one +- the threshold the value will be published or not
@@ -67,9 +74,11 @@ const float adc_resistor_devider = (ext_resistor_kiloohm+220)/100+1;
 int persistedadc = 0;
 int sendADCnoChange = 0;
 int sendADCnoChangeTreshold = 2;
-boolean initADC = false;
-boolean SendInitialADC = true;
-boolean PartiallyCharged = false;
+int cannotconnectwificounter = 0;
+int DSleepSeconds = 10;
+bool initADC = false;
+bool SendInitialADC = true;
+bool PartiallyCharged = false;
 const String MQTTOutADCRawTopic = "/adcraw";
 const String MQTTOutADCVoltTopic = "/adcvolt";
 // --------------------------------------------------------------------------------------
@@ -82,14 +91,15 @@ long lastPublish = 0;
 boolean loadDataSuccess = false;
 boolean saveItNow = false;          //If true will store positions to filesystem
 boolean initLoop = true;            //To enable actions first time the loop is run
-/*
+
 #ifdef ESP32
 WebServer server(80);              // TCP server at port 80 will respond to HTTP requests
 #else
 ESP8266WebServer server(80);              // TCP server at port 80 will respond to HTTP requests
 #endif
-*/
+
 // --- WebSocketsServer webSocket = WebSocketsServer(81);  // WebSockets will respond on port 81
+//Pinger pinger;
 
 bool loadConfig() {
     if (!helper.loadconfig()) {
@@ -181,10 +191,17 @@ void sendADC() {
     if (isnan(sensorValue)) {
       Serial.println("Failed to read from ADC !");
     } else {
-      if ( sensorValue > 930 ) { 
-          PartiallyCharged = true;
-      } else { 
-               PartiallyCharged = false;
+      if ( sensorValue > 930 ) {
+         Serial.println("sensorValue: ");
+         Serial.println(sensorValue);
+         PartiallyCharged = true;
+         Serial.println("PartiallyCharged: ");
+         Serial.println(BoolToString(PartiallyCharged));
+             } else {
+                 Serial.println(sensorValue);
+                 PartiallyCharged = false;
+                 Serial.println("PartiallyCharged: ");
+                 Serial.println(BoolToString(PartiallyCharged));
              }
       if (sensorValue >= persistedadc + ThresholdReadingADC || sensorValue <= persistedadc - ThresholdReadingADC) {
 
@@ -383,7 +400,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
     }
     processRequest(jsonRequest);
 }
-/*
+
 void handleRoot() {
     server.send(200, "text/html", INDEX_HTML);
 }
@@ -402,7 +419,7 @@ void handleNotFound() {
     }
     server.send(404, "text/plain", message);
 }
-*/
+
 /*
 void setupOTA() {
     // Authentication to avoid unauthorized updates
@@ -565,7 +582,7 @@ void setup(void) {
         mqttHelper.reconnect();
     };
 
-    WiFiSettings.connect();
+    WiFiSettings.connect(false);
 
     /*
        Try to load FS data configuration every time when
@@ -596,10 +613,10 @@ void setup(void) {
     Serial.println(WiFi.localIP());
 
     //Start HTTP server
-    // --- server.on("/", handleRoot);
-    // --- server.on("/reset", [&] { helper.resetsettings(); });
-    // --- server.onNotFound(handleNotFound);
-    // --- server.begin();
+    server.on("/", handleRoot);
+    server.on("/reset", [&] { helper.resetsettings(); });
+    server.onNotFound(handleNotFound);
+    server.begin();
 
     //Start websocket
     // --- webSocket.begin();
@@ -621,9 +638,9 @@ void setup(void) {
     mqttHelper.setup(mqttCallback);
 
     //Update webpage
-    // --- INDEX_HTML.replace("{VERSION}", "v" + version);
-    // --- INDEX_HTML.replace("{NAME}", String(deviceHostname));
-    // --- INDEX_HTML.replace("{CONNECTED_STEPPERS}", connectedSteppers);
+    INDEX_HTML.replace("{VERSION}", "v" + version);
+    INDEX_HTML.replace("{NAME}", String(deviceHostname));
+    INDEX_HTML.replace("{CONNECTED_STEPPERS}", connectedSteppers);
 
 #ifdef ESP32
     esp_task_wdt_init(10, true);
@@ -652,15 +669,48 @@ void loop(void) {
 
     //Websocket listner
     // --- webSocket.loop();
+
 #ifdef ESP32
     esp_task_wdt_reset();
 #else //ESP8266
     ESP.wdtFeed();
 #endif
-    if (WiFi.status() != WL_CONNECTED && PartiallyCharged)
-    {
-       ESP.restart();
-    }
+
+    if ((WiFi.status() != WL_CONNECTED) && (PartiallyCharged))
+        {
+/*
+         if ((PartiallyCharged) && (cannotconnectwificounter >=10 ))
+            {
+                         Serial.println("Cannot connect to WiFi");
+                         Serial.println("Rebooting ESP...");
+                         ESP.restart();
+            }
+         if ((!PartiallyCharged) && (cannotconnectwificounter >=3 ))
+            {
+                       Serial.println("Couldn`t connect to Wifi");
+                       Serial.println("Going DeepSleep mode for: ");
+                       Serial.println( DSleepSeconds);
+                       Serial.println("seconds");
+                       cannotconnectwificounter =0;
+                       ESP.restart();
+                       //ESP.deepSleep ( DSleepSeconds *1000 );
+
+            }
+         Serial.println("Connect to WiFi try no.:");
+         Serial.println(cannotconnectwificounter);
+         Serial.println("Disconnect WiFi");
+         WiFi.disconnect();
+         delay(2000);
+         Serial.println("Trying to connect WiFi");
+         WiFiSettings.connect();
+         delay(2000);
+         cannotconnectwificounter +=1;
+*/
+             Serial.println("Cannot connect to WiFi");
+             Serial.println("Rebooting ESP...");
+             ESP.restart();
+        }
+
     if (buttonsHelper.useButtons) {
         buttonsHelper.processButtons();
     }
@@ -668,7 +718,7 @@ void loop(void) {
     /**
       Serving the webpage
     */
-    // --- server.handleClient();
+    server.handleClient();
 
     mqttHelper.loop();
 
