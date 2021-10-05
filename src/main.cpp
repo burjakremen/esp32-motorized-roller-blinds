@@ -11,15 +11,15 @@ Do you really want this?
 
 #define CONTROL_DCDC_CONVERTER_POWER true //Is need to control power of DC\DC converter for ULN2003
 #ifndef MotorPowerEnablePIN
-    #define MotorPowerEnablePIN LED_BUILTIN // Pin which enable dc/dc power converter for ULN2003
+    #define MotorPowerEnablePIN 3 //LED_BUILTIN // Pin which enable dc/dc power converter for ULN2003
 #endif
 
 #include <CheapStepper.h>
 //#include <ESP8266mDNS.h>
 //#include <WiFiUdp.h>
 
-// --- #include <WebSocketsServer.h>
-// --- #include <ArduinoOTA.h>
+#include <WebSocketsServer.h>
+#include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <WiFiSettings.h>
 #include "Helpers/ConfigHelper.h"
@@ -59,7 +59,7 @@ StepperHelper stepperHelpers[MAX_STEPPERS_COUNT];
 #endif
 
 #if !defined(TimeBetweenReadingADC) || (TimeBetweenReadingADC < 200)
-  #define TimeBetweenReadingADC 1000//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
+  #define TimeBetweenReadingADC 3600000//120000 // time between 2 ADC readings, minimum 200 to let the time of the ESP to keep the connection
 #endif
 #ifndef ThresholdReadingADC
     #define ThresholdReadingADC 5 // following the comparison between the previous value and the current one +- the threshold the value will be published or not
@@ -67,6 +67,7 @@ StepperHelper stepperHelpers[MAX_STEPPERS_COUNT];
 #define USE_Divider_Resistor_Value false //Use 'devider resistor' value instead of 'voltage'
 
 const int analogInPin = A0; //ADC pin
+const int sleepminutes = 1; //DeepSleep Time
 unsigned long timeadc = 0;
 float adc_divider_voltage = 4.23; //ADC Divider Input voltage, for LiOn Accum`s 4.2
 const float ext_resistor_kiloohm = 100;
@@ -98,7 +99,7 @@ WebServer server(80);              // TCP server at port 80 will respond to HTTP
 ESP8266WebServer server(80);              // TCP server at port 80 will respond to HTTP requests
 #endif
 
-// --- WebSocketsServer webSocket = WebSocketsServer(81);  // WebSockets will respond on port 81
+WebSocketsServer webSocket = WebSocketsServer(81);  // WebSockets will respond on port 81
 //Pinger pinger;
 
 bool loadConfig() {
@@ -155,7 +156,7 @@ void sendRAW_ADC(int raw_value) {
         mqttHelper.publishMsg(mqttHelper.outputTopic+MQTTOutADCRawTopic, jsonOutput_raw);
     }
 
-// ---    webSocket.broadcastTXT(jsonOutput_raw);
+    webSocket.broadcastTXT(jsonOutput_raw);
 }
 
 void sendVOLT_ADC(int raw_value){
@@ -180,7 +181,7 @@ void sendVOLT_ADC(int raw_value){
         mqttHelper.publishMsg(mqttHelper.outputTopic+MQTTOutADCVoltTopic, jsonOutput_volt);
     }
 
-// ---    webSocket.broadcastTXT(jsonOutput_volt);
+webSocket.broadcastTXT(jsonOutput_volt);
 
 }
 
@@ -191,7 +192,7 @@ void sendADC() {
     if (isnan(sensorValue)) {
       Serial.println("Failed to read from ADC !");
     } else {
-      if ( sensorValue > 930 ) {
+      if ( sensorValue > 800 ) {
          Serial.println("sensorValue: ");
          Serial.println(sensorValue);
          PartiallyCharged = true;
@@ -262,7 +263,7 @@ void sendUpdate() {
         mqttHelper.publishMsg(mqttHelper.outputTopic, jsonOutput);
     }
 
-// ---    webSocket.broadcastTXT(jsonOutput);
+   webSocket.broadcastTXT(jsonOutput);
 }
 
 /****************************************************************************************
@@ -373,7 +374,7 @@ void processRequest(String &payload, uint8_t client_id = 0) {
         Serial.println("parseObject() failed");
     }
 }
-/*
+
 void webSocketEvent(uint8_t clientId, WStype_t type, uint8_t *payload, size_t length) {
     switch (type) {
         case WStype_CONNECTED:
@@ -389,7 +390,7 @@ void webSocketEvent(uint8_t clientId, WStype_t type, uint8_t *payload, size_t le
             break;
     }
 }
-*/
+
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
     Serial.print("MQTT message received [");
     Serial.print(topic);
@@ -420,7 +421,7 @@ void handleNotFound() {
     server.send(404, "text/plain", message);
 }
 
-/*
+
 void setupOTA() {
     // Authentication to avoid unauthorized updates
     //ArduinoOTA.setPassword(OTA_PWD); //@TODO: make it configurable
@@ -447,7 +448,7 @@ void setupOTA() {
 
     ArduinoOTA.begin();
 }
-*/
+
 void onPressHandler(Button2 &btn) {
     Serial.println("onPressHandler");
     String newValue;
@@ -565,12 +566,12 @@ void setup(void) {
     //clean FS, for testing
     // helper.resetsettings();
 
-    // --- WiFiSettings.onPortal = []() {
-    // ---     setupOTA();
-    // --- };
-    // --- WiFiSettings.onPortalWaitLoop = []() {
-    // ---     ArduinoOTA.handle();
-    // --- };
+    WiFiSettings.onPortal = []() {
+         setupOTA();
+    };
+    WiFiSettings.onPortalWaitLoop = []() {
+         ArduinoOTA.handle();
+    };
     WiFiSettings.onSuccess = []() {
         buttonsHelper.setupButtons();
 
@@ -619,10 +620,10 @@ void setup(void) {
     server.begin();
 
     //Start websocket
-    // --- webSocket.begin();
-    // --- webSocket.onEvent(webSocketEvent);
+    webSocket.begin();
+    webSocket.onEvent(webSocketEvent);
 
-    // --- setupOTA();
+    setupOTA();
 
     uint8_t num = 0;
     String connectedSteppers;
@@ -636,6 +637,9 @@ void setup(void) {
     }
 
     mqttHelper.setup(mqttCallback);
+
+    pinMode(D0, WAKEUP_PULLUP);
+    //pinMode(analogInPin, INPUT);
 
     //Update webpage
     INDEX_HTML.replace("{VERSION}", "v" + version);
@@ -665,52 +669,30 @@ void stopPowerToCoils() {
 
 void loop(void) {
     //OTA client code
-    // --- ArduinoOTA.handle();
+    ArduinoOTA.handle();
 
     //Websocket listner
-    // --- webSocket.loop();
+    webSocket.loop();
 
 #ifdef ESP32
     esp_task_wdt_reset();
 #else //ESP8266
     ESP.wdtFeed();
 #endif
-
-    if ((WiFi.status() != WL_CONNECTED) && (PartiallyCharged))
-        {
-/*
-         if ((PartiallyCharged) && (cannotconnectwificounter >=10 ))
-            {
-                         Serial.println("Cannot connect to WiFi");
-                         Serial.println("Rebooting ESP...");
-                         ESP.restart();
-            }
-         if ((!PartiallyCharged) && (cannotconnectwificounter >=3 ))
-            {
-                       Serial.println("Couldn`t connect to Wifi");
-                       Serial.println("Going DeepSleep mode for: ");
-                       Serial.println( DSleepSeconds);
-                       Serial.println("seconds");
-                       cannotconnectwificounter =0;
-                       ESP.restart();
-                       //ESP.deepSleep ( DSleepSeconds *1000 );
-
-            }
-         Serial.println("Connect to WiFi try no.:");
-         Serial.println(cannotconnectwificounter);
-         Serial.println("Disconnect WiFi");
-         WiFi.disconnect();
-         delay(2000);
-         Serial.println("Trying to connect WiFi");
-         WiFiSettings.connect();
-         delay(2000);
-         cannotconnectwificounter +=1;
-*/
-             Serial.println("Cannot connect to WiFi");
-             Serial.println("Rebooting ESP...");
-             ESP.restart();
-        }
-
+    Serial.println(WiFi.status());
+    if (WiFi.status() != WL_CONNECTED){
+       Serial.println("WiFi Disconnected");
+       if (PartiallyCharged){
+           Serial.println("Rebooting ESP...");
+           ESP.restart();
+       } else {
+           Serial.println("DeepSleep for");
+           Serial.println(sleepminutes);
+           Serial.println("minutes");
+           delay (1000);
+           ESP.deepSleep(sleepminutes * 60000);
+       }
+    }
     if (buttonsHelper.useButtons) {
         buttonsHelper.processButtons();
     }
@@ -774,16 +756,11 @@ void loop(void) {
     }
 
     if (UseADC) {
-       if (!initADC){
-          pinMode(analogInPin, INPUT);
+       if (SendInitialADC) {
           if (CONTROL_DCDC_CONVERTER_POWER) {
              pinMode(MotorPowerEnablePIN, OUTPUT);
              digitalWrite(MotorPowerEnablePIN, HIGH);
           }
-          initADC = true;
-          Serial.println("ADC Input Init");
-       } // else { Serial.println("ADC input Already Initiated"); }
-       if (SendInitialADC) {
           if (mqttHelper.isMqttEnabled && mqttHelper.getClient().connected()){
              sendADC();
              SendInitialADC = false;
@@ -792,7 +769,7 @@ void loop(void) {
        if (millis() > (timeadc + TimeBetweenReadingADC)) {
            timeadc = millis();
            sendADC();
-        }
+       }
     }
 
     /*
