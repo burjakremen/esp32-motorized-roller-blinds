@@ -90,7 +90,7 @@ const String MQTTOutADCVoltTopic = "/adcvolt";
 const int DSleepHours = 0;
 const int DSleepMinutes = 1+(DSleepHours*60);
 const int DSleepSeconds = 0+(DSleepMinutes*60);
-const uint32 DSleeptime = DSleepSeconds * 10e6;
+const uint32 DSleeptime = DSleepSeconds * 1000000;
 // ---------------------------------------------------------------------------------------
 
 String deviceHostname;             //WIFI config: Bonjour name of device
