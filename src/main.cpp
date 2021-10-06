@@ -21,6 +21,7 @@ Do you really want this?
 #include <WebSocketsServer.h>
 #include <ArduinoOTA.h>
 #include <ArduinoJson.h>
+#include <Arduino.h>
 #include <WiFiSettings.h>
 #include "Helpers/ConfigHelper.h"
 #include "Helpers/MqttHelper.h"
@@ -69,20 +70,28 @@ StepperHelper stepperHelpers[MAX_STEPPERS_COUNT];
 const int analogInPin = A0; //ADC pin
 const int sleepminutes = 1; //DeepSleep Time
 unsigned long timeadc = 0;
-float adc_divider_voltage = 4.23; //ADC Divider Input voltage, for LiOn Accum`s 4.2
+float adc_divider_voltage = 4.21; //ADC Divider Input voltage, for LiOn Accum`s 4.2
 const float ext_resistor_kiloohm = 100;
 const float adc_resistor_devider = (ext_resistor_kiloohm+220)/100+1;
 int persistedadc = 0;
 int sendADCnoChange = 0;
 int sendADCnoChangeTreshold = 2;
-int cannotconnectwificounter = 0;
-int DSleepSeconds = 10;
+//int cannotconnectwificounter = 0;
+//int DSleepSeconds = 10;
 bool initADC = false;
 bool SendInitialADC = true;
 bool PartiallyCharged = false;
 const String MQTTOutADCRawTopic = "/adcraw";
 const String MQTTOutADCVoltTopic = "/adcvolt";
 // --------------------------------------------------------------------------------------
+
+
+// ------------------------ Deep Sleep Time-----------------------------------------------
+const int DSleepHours = 0;
+const int DSleepMinutes = 1+(DSleepHours*60);
+const int DSleepSeconds = 0+(DSleepMinutes*60);
+const uint32 DSleeptime = DSleepSeconds * 10e6;
+// ---------------------------------------------------------------------------------------
 
 String deviceHostname;             //WIFI config: Bonjour name of device
 int steppersRPM;                   //WIFI config
@@ -638,8 +647,6 @@ void setup(void) {
 
     mqttHelper.setup(mqttCallback);
 
-    pinMode(D0, WAKEUP_PULLUP);
-    //pinMode(analogInPin, INPUT);
 
     //Update webpage
     INDEX_HTML.replace("{VERSION}", "v" + version);
@@ -679,7 +686,8 @@ void loop(void) {
 #else //ESP8266
     ESP.wdtFeed();
 #endif
-    Serial.println(WiFi.status());
+
+    //Serial.println(WiFi.status());
     if (WiFi.status() != WL_CONNECTED){
        Serial.println("WiFi Disconnected");
        if (PartiallyCharged){
@@ -687,12 +695,17 @@ void loop(void) {
            ESP.restart();
        } else {
            Serial.println("DeepSleep for");
-           Serial.println(sleepminutes);
-           Serial.println("minutes");
+           /*Serial.println(DSleepHours);
+           Serial.println("hours");
+           Serial.println(DSleepMinutes);
+           Serial.println("minutes");*/
+           Serial.println(DSleepSeconds);
+           Serial.println("seconds");
            delay (1000);
-           ESP.deepSleep(sleepminutes * 60000);
+           ESP.deepSleep(DSleeptime);
        }
     }
+
     if (buttonsHelper.useButtons) {
         buttonsHelper.processButtons();
     }
